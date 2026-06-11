@@ -1,11 +1,14 @@
 // Chat screen with real-time streaming via REST API.
 // Uses REST endpoints: POST /api/sessions/{id}/chat and
 // GET /api/sessions/{id}/messages.
+// Voice support: speech-to-text input via microphone button,
+// text-to-speech read-aloud on assistant messages.
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/connection_manager.dart';
+import '../services/voice_service.dart';
 import '../utils/responsive.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -37,6 +40,9 @@ class _ChatScreenState extends State<ChatScreen> {
   // Verbose mode
   bool _verboseMode = false;
 
+  // Voice service
+  final VoiceService _voice = VoiceService();
+
   // Scroll management
   final _scrollController = ScrollController();
   bool _showScrollToBottom = false;
@@ -52,20 +58,45 @@ class _ChatScreenState extends State<ChatScreen> {
     _fetchMessages();
     _loadVerboseMode();
     _scrollController.addListener(_onScroll);
+    _initVoice();
   }
 
-  Future<void> _loadVerboseMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() => _verboseMode = prefs.getBool('verbose_mode') ?? false);
+  Future<void> _initVoice() async {
+    _voice.onSpeechResult = (text) {
+      if (!mounted) return;
+      _textController.text = text;
+      _sendMessage();
+    };
+    _voice.onSpeechInterim = (text) {
+      if (!mounted) return;
+      setState(() {
+        // Interim text shown in the input field
+        if (_textController.text != text) {
+          _textController.text = text;
+        }
+      });
+    };
+    _voice.addListener(_onVoiceChange);
+  }
+
+  void _onVoiceChange() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _voice.removeListener(_onVoiceChange);
+    _voice.dispose();
     _client.close();
     _textController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadVerboseMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => _verboseMode = prefs.getBool('verbose_mode') ?? false);
   }
 
   void _onScroll() {
@@ -312,6 +343,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildInputBar() {
+    final listening = _voice.isListening;
+    final hasStt = _voice.sttAvailable && _voice.sttEnabled;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -321,44 +355,102 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
       child: SafeArea(
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: TextField(
-                controller: _textController,
-                decoration: InputDecoration(
-                  hintText: 'Type a message…',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  isDense: true,
-                ),
-                minLines: 1,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.sentences,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.send,
-                enabled: !_loading && !_streaming,
-                onSubmitted: (_) => _sendMessage(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            CircleAvatar(
-              child: _streaming
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
+            // Interim recognition display
+            if (listening)
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 12,
+                      height: 12,
                       child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : IconButton(
-                      icon: const Icon(Icons.send, size: 20),
-                      onPressed: _sendMessage,
-                      tooltip: 'Send',
                     ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _voice.lastRecognizedWords.isEmpty
+                            ? 'Listening…'
+                            : _voice.lastRecognizedWords,
+                        style: TextStyle(
+                          fontStyle: _voice.lastRecognizedWords.isEmpty
+                              ? FontStyle.italic
+                              : FontStyle.normal,
+                          color: Colors.grey[600],
+                          fontSize: 13,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Row(
+              children: [
+                // Microphone button
+                if (hasStt)
+                  IconButton(
+                    icon: Icon(
+                      listening ? Icons.mic : Icons.mic_none,
+                      color: listening ? Colors.red : null,
+                    ),
+                    tooltip: listening ? 'Stop listening' : 'Voice input',
+                    onPressed: (_loading || _streaming)
+                        ? null
+                        : () {
+                            if (listening) {
+                              _voice.stopListening();
+                            } else {
+                              _voice.startListening();
+                            }
+                          },
+                  ),
+                Expanded(
+                  child: TextField(
+                    controller: _textController,
+                    decoration: InputDecoration(
+                      hintText: listening
+                          ? 'Speak now…'
+                          : 'Type a message…',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      isDense: true,
+                    ),
+                    minLines: 1,
+                    maxLines: 4,
+                    textCapitalization: TextCapitalization.sentences,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.send,
+                    enabled: !_loading && !_streaming && !listening,
+                    onSubmitted: (_) => _sendMessage(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                CircleAvatar(
+                  child: _streaming
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : IconButton(
+                          icon: const Icon(Icons.send, size: 20),
+                          onPressed: _sendMessage,
+                          tooltip: 'Send',
+                        ),
+                ),
+              ],
             ),
           ],
         ),
@@ -416,6 +508,8 @@ class _ChatScreenState extends State<ChatScreen> {
           isUser: isUser,
           verbose: _verboseMode,
           metadata: msg,
+          ttsEnabled: _voice.ttsEnabled,
+          onReadAloud: (text) => _voice.speak(text),
         );
       },
     );
@@ -427,12 +521,16 @@ class _MessageBubble extends StatelessWidget {
   final bool isUser;
   final bool verbose;
   final Map<String, dynamic> metadata;
+  final bool ttsEnabled;
+  final void Function(String text)? onReadAloud;
 
   const _MessageBubble({
     required this.content,
     required this.isUser,
     this.verbose = false,
     this.metadata = const {},
+    this.ttsEnabled = false,
+    this.onReadAloud,
   });
 
   @override
@@ -574,8 +672,26 @@ class _MessageBubble extends StatelessWidget {
       mainAxisAlignment: isUser
           ? MainAxisAlignment.end
           : MainAxisAlignment.start,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [bubble],
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        bubble,
+        // TTS read-aloud button on assistant messages
+        if (!isUser && ttsEnabled && onReadAloud != null && content.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: IconButton(
+              icon: const Icon(Icons.volume_up, size: 18),
+              onPressed: () => onReadAloud!(content),
+              tooltip: 'Read aloud',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

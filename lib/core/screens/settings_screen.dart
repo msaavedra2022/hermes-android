@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/connection_manager.dart';
+import '../services/voice_service.dart';
 import '../../main.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -310,6 +311,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _VerboseToggle(),
         const SizedBox(height: 16),
 
+        // ---- Section: Voice ----
+        _buildSectionHeader('Voice'),
+        _VoiceSettingsToggle(),
+        const SizedBox(height: 16),
+
         // ---- Section: Connection ----
         _buildSectionHeader('Connection'),
         Card(
@@ -535,6 +541,116 @@ class _ThemeToggleState extends State<_ThemeToggle> {
         onSelectionChanged: (s) => _setMode(s.first),
         style: ButtonStyle(visualDensity: VisualDensity.compact),
       ),
+    );
+  }
+}
+
+/// Voice settings toggle for speech-to-text and text-to-speech.
+class _VoiceSettingsToggle extends StatefulWidget {
+  @override
+  State<_VoiceSettingsToggle> createState() => _VoiceSettingsToggleState();
+}
+
+class _VoiceSettingsToggleState extends State<_VoiceSettingsToggle> {
+  final VoiceService _voice = VoiceService();
+  bool _sttEnabled = true;
+  bool _ttsEnabled = true;
+  double _ttsRate = 0.5;
+
+  @override
+  void initState() {
+    super.initState();
+    _sttEnabled = _voice.sttEnabled;
+    _ttsEnabled = _voice.ttsEnabled;
+    _ttsRate = _voice.ttsRate;
+    _voice.addListener(_onChange);
+  }
+
+  @override
+  void dispose() {
+    _voice.removeListener(_onChange);
+    _voice.dispose();
+    super.dispose();
+  }
+
+  void _onChange() {
+    if (mounted) {
+      setState(() {
+        _sttEnabled = _voice.sttEnabled;
+        _ttsEnabled = _voice.ttsEnabled;
+        _ttsRate = _voice.ttsRate;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Card(
+          child: SwitchListTile(
+            title: const Text('Speech-to-Text'),
+            subtitle: const Text(
+                'Use your voice to send messages (microphone required)'),
+            secondary: const Icon(Icons.mic),
+            value: _sttEnabled,
+            onChanged: (v) => _voice.setSttEnabled(v),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: SwitchListTile(
+            title: const Text('Text-to-Speech'),
+            subtitle:
+                const Text('Read Hermes responses aloud (speaker icon in chat)'),
+            secondary: const Icon(Icons.record_voice_over),
+            value: _ttsEnabled,
+            onChanged: (v) => _voice.setTtsEnabled(v),
+          ),
+        ),
+        if (_ttsEnabled) ...[
+          const SizedBox(height: 8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.speed),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Speech Rate',
+                            style: TextStyle(fontSize: 15)),
+                        Text(
+                          '${(_ttsRate * 2).toStringAsFixed(1)}x',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: Slider(
+                      value: _ttsRate,
+                      min: 0.1,
+                      max: 1.0,
+                      divisions: 9,
+                      label: '${(_ttsRate * 2).toStringAsFixed(1)}x',
+                      onChanged: (v) => _voice.setTtsRate(v),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
