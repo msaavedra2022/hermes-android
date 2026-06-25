@@ -60,8 +60,15 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      - name: Build APK (release)
-        run: flutter build apk --release --split-per-abi
+      - name: Build APK
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            flutter build apk --release --split-per-abi
+          else
+            flutter build apk --debug --split-per-abi
+          fi
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
