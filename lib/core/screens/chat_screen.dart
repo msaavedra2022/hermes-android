@@ -281,10 +281,6 @@ class _ChatScreenState extends State<ChatScreen> {
           }
         });
       },
-      onToolProgress: (progress) {
-        if (!mounted) return;
-        _upsertToolProgress(progress);
-      },
       onDone: () async {
         if (!mounted) return;
         // Refresh messages to get the final server-side state
@@ -567,6 +563,8 @@ class _ChatScreenState extends State<ChatScreen> {
         final role = (msg['role'] as String?) ?? 'assistant';
         final content = (msg['content'] as String?) ?? '';
         final isUser = role == 'user';
+        // Skip tool outputs and tool progress messages
+        if (role == 'tool' || role == 'tool_progress') return const SizedBox.shrink();
 
         return _MessageBubble(
           content: content,
