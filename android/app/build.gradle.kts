@@ -23,7 +23,7 @@ android {
    }
 
    defaultConfig {
-       applicationId = "com.hermesagent.hermes_android"
+       applicationId = "com.hermesagent.hermes_android_debug"
        minSdk = 24
        targetSdk = 36
        versionCode = flutter.versionCode
